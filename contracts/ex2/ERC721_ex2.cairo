@@ -4,12 +4,28 @@
 %lang starknet
 
 from starkware.cairo.common.cairo_builtins import HashBuiltin, SignatureBuiltin
-from starkware.cairo.common.uint256 import Uint256
+from starkware.cairo.common.uint256 import Uint256, uint256_add, uint256_check
+from starkware.starknet.common.syscalls import get_caller_address
 
 from openzeppelin.token.erc721.library import ERC721
 from openzeppelin.introspection.erc165.library import ERC165
 
 from openzeppelin.access.ownable.library import Ownable
+
+// Variables 
+struct Animal {
+    sex: felt,
+    legs: felt,
+    wings: felt,
+}
+
+@storage_var
+func animals(token_id : Uint256) -> (animal : Animal) {
+}
+
+@storage_var
+func latest_token_id() -> (token_id: Uint256) {
+}
 
 //
 // Constructor
@@ -27,6 +43,7 @@ func constructor{
     ){
     ERC721.initializer(name, symbol);
     Ownable.initializer(owner);
+    token_id_initializer();
     return ();
 }
 
@@ -124,6 +141,27 @@ func owner{
     return (owner,);
 }
 
+@view
+func get_animal_characteristics{
+        syscall_ptr: felt*,
+        pedersen_ptr: HashBuiltin*,
+        range_check_ptr
+    }(token_id : Uint256) -> (sex : felt, legs : felt, wings : felt) {
+    with_attr error_message("ERC721: token_id is not a valid Uint256") {
+        uint256_check(token_id);
+    }
+    let animal = animals.read(token_id);
+    let animal_ptr = cast(&animal, Animal*);
+    return (sex=animal_ptr.sex, legs=animal_ptr.legs, wings=animal_ptr.wings);
+}
+
+//Initialize the token ID
+func token_id_initializer{pedersen_ptr : HashBuiltin*, syscall_ptr : felt*, range_check_ptr}() {
+    let zero_as_uint256 : Uint256 = Uint256(0, 0);
+    latest_token_id.write(zero_as_uint256);
+    return ();
+}
+
 //
 // Externals
 //
@@ -136,6 +174,32 @@ func approve{
     }(to: felt, tokenId: Uint256){
     ERC721.approve(to, tokenId);
     return ();
+}
+
+@external
+func declare_animal{
+        syscall_ptr: felt*,
+        pedersen_ptr: HashBuiltin*,
+        range_check_ptr
+    }(sex : felt, legs : felt, wings : felt) -> (token_id : Uint256){
+    alloc_locals;
+    Ownable.assert_only_owner();
+
+    //Create token IDs for minting
+    let current_token_id : Uint256 = latest_token_id.read();
+    let one_as_uint256 = Uint256(1, 0);
+    let (local new_token_id, _) = uint256_add(current_token_id, one_as_uint256);
+ 
+    //Minting the new token
+    let (sender_address) = get_caller_address();
+    ERC721._mint(sender_address, new_token_id);
+
+    //Write new token -> animal mapping to the struct variable
+    animals.write(new_token_id, Animal(sex=sex, legs=legs, wings=wings));
+    
+    //Update the latest token ID
+    latest_token_id.write(new_token_id);
+    return (token_id=new_token_id);
 }
 
 @external
@@ -178,16 +242,17 @@ func safeTransferFrom{
     return ();
 }
 
-@external
-func mint{
-        pedersen_ptr: HashBuiltin*,
-        syscall_ptr: felt*,
-        range_check_ptr
-    }(to: felt, tokenId: Uint256){
-    Ownable.assert_only_owner();
-    ERC721._mint(to, tokenId);
-    return ();
-}
+//NOT REQUIRED FOR EX2
+// @external
+// func mint{
+//         pedersen_ptr: HashBuiltin*,
+//         syscall_ptr: felt*,
+//         range_check_ptr
+//     }(to: felt, tokenId: Uint256){
+//     Ownable.assert_only_owner();
+//     ERC721._mint(to, tokenId);
+//     return ();
+// }
 
 @external
 func burn{
